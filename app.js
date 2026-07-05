@@ -1,0 +1,341 @@
+const SUPABASE_URL = "https://fddfqydbfbbpjwfpecpp.supabase.co/rest/v1/";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZkZGZxeWRiZmJicGp3ZnBlY3BwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyOTI0MTcsImV4cCI6MjA5Njg2ODQxN30.EC4slL2YtLdQ1ibnRiwLcnawy8dC-a2j1HRehZUCeq4";
+
+const configCapas = {
+    uso_suelo:          { color: "#8b5cf6", label: "Uso de Suelo" },
+    predios:            { color: "#ef4444", label: "Predios (Lotes)" },
+    parroquias:         { color: "#f59e0b", label: "Parroquias" },
+    edificaciones:      { color: "#10b981", label: "Edificaciones" },
+    limite_urbano:      { color: "#3b82f6", label: "Límite Urbano" },
+    reportes_ciudadanos: { color: "#f97316", label: "Reportes Ciudadanos", puntos: true }
+};
+
+const camposLegibles = {
+    clave_cata:    "Clave Catastral",
+    uso_suelo1:    "Uso de Suelo",
+    propietari:    "Propietario",
+    zona_nombr:    "Zona",
+    sector_nom:    "Sector",
+    predio_nom:    "Nombre Predio",
+    predio_are:    "Area (m²)",
+    entity:        "Entidad",
+    layer:         "Capa CAD",
+    refname:       "Referencia",
+    dpa_despar:    "Parroquia",
+    dpa_descan:    "Cantón",
+    dpa_provin:    "Provincia",
+    area:          "Area (m²)",
+    piso:          "Pisos",
+    nombre:        "Nombre",
+    tipo_problema: "Problema",
+    comentario:    "Comentario",
+    estado:        "Estado",
+    created_at:    "Fecha"
+};
+
+const popupFields = {
+    uso_suelo:           ["clave_cata", "uso_suelo1", "propietari", "zona_nombr", "sector_nom", "predio_nom", "predio_are"],
+    predios:             ["entity", "layer", "refname"],
+    parroquias:          ["dpa_despar", "dpa_descan", "dpa_provin"],
+    edificaciones:       ["area", "piso"],
+    limite_urbano:       ["nombre", "area"],
+    reportes_ciudadanos: ["tipo_problema", "comentario", "estado", "created_at"]
+};
+
+const map = L.map('map', {
+    zoomControl: false
+}).setView([-4.066, -78.966], 14);
+
+L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19
+});
+
+const satelital = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    maxZoom: 19,
+    attribution: 'Esri'
+});
+
+const mapasBase = {
+    "Calle": osm,
+    "Satelital": satelital
+};
+
+satelital.addTo(map);
+
+function cargarCapa(nombreTabla, estiloColor) {
+    const grupoCapa = L.layerGroup();
+    const limite = 1000;
+    let offset = 0;
+    let todasLasFeatures = [];
+
+    function pedirFragmento() {
+        const url = `${SUPABASE_URL}${nombreTabla}?select=*&limit=${limite}&offset=${offset}`;
+
+        fetch(url, {
+            headers: {
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
+            }
+        })
+        .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        })
+        .then(data => {
+            if (!Array.isArray(data) || data.length === 0) {
+                finalizarCarga(todasLasFeatures, grupoCapa, nombreTabla, estiloColor);
+                return;
+            }
+
+            const features = data.map(item => {
+                if (!item.geom) return null;
+                return {
+                    type: "Feature",
+                    geometry: item.geom,
+                    properties: { ...item, geom: null }
+                };
+            }).filter(f => f !== null);
+
+            todasLasFeatures = todasLasFeatures.concat(features);
+
+            if (data.length === limite) {
+                offset += limite;
+                pedirFragmento();
+            } else {
+                finalizarCarga(todasLasFeatures, grupoCapa, nombreTabla, estiloColor);
+            }
+        })
+        .catch(err => console.error(`Error en ${nombreTabla}:`, err));
+    }
+
+    pedirFragmento();
+    return grupoCapa;
+}
+
+function finalizarCarga(features, grupoCapa, nombreTabla, estiloColor) {
+    if (features.length === 0) return;
+
+    const geojson = { type: "FeatureCollection", features };
+    const campos = popupFields[nombreTabla] || [];
+    const esPuntos = configCapas[nombreTabla] && configCapas[nombreTabla].puntos;
+
+    const opts = {
+        onEachFeature: (feature, layer) => {
+            const label = configCapas[nombreTabla].label;
+            let filas = "";
+
+            campos.forEach(campo => {
+                const val = feature.properties[campo];
+                if (val !== null && val !== undefined && val !== "") {
+                    const etiqueta = camposLegibles[campo] || campo;
+                    filas += `<tr><td>${etiqueta}</td><td>${val}</td></tr>`;
+                }
+            });
+
+            if (!filas) filas = '<tr><td style="text-align:center;padding:12px;color:#94a3b8">Sin datos disponibles</td></tr>';
+
+            layer.bindPopup(`
+                <div>
+                    <div class="popup-header">${label}</div>
+                    <table>${filas}</table>
+                </div>
+            `);
+        }
+    };
+
+    if (esPuntos) {
+        opts.pointToLayer = (feature, latlng) => {
+            return L.circleMarker(latlng, {
+                radius: 7,
+                fillColor: estiloColor,
+                color: "#ffffff",
+                weight: 2,
+                opacity: 1,
+                fillOpacity: 0.8
+            });
+        };
+    } else {
+        opts.style = {
+            color: estiloColor,
+            weight: 1.5,
+            fillColor: estiloColor,
+            fillOpacity: 0.25
+        };
+    }
+
+    const capaLayer = L.geoJSON(geojson, opts).addTo(grupoCapa);
+
+    capaGeoJSONs.push(capaLayer);
+    if (++capasCargadas >= totalCapas) {
+        ocultarLoading();
+        const bounds = L.featureGroup(capaGeoJSONs).getBounds();
+        if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
+    }
+}
+
+function ocultarLoading() {
+    const el = document.getElementById('loading');
+    if (el) el.classList.add('hidden');
+}
+
+const capaGeoJSONs = [];
+let capasCargadas = 0;
+const nombresCapas = Object.keys(configCapas);
+const totalCapas = nombresCapas.length;
+const capasVisor = {};
+
+nombresCapas.forEach(nombre => {
+    const cfg = configCapas[nombre];
+    capasVisor[cfg.label] = cargarCapa(nombre, cfg.color);
+});
+
+Object.values(capasVisor).forEach(capa => capa.addTo(map));
+
+L.control.layers(mapasBase, capasVisor, { collapsed: false }).addTo(map);
+
+// ---- Reportes ciudadanos ----
+
+let reportMarker = null;
+
+function recargarReportes() {
+    const grupo = capasVisor["Reportes Ciudadanos"];
+    if (!grupo) return;
+    grupo.clearLayers();
+    const cfg = configCapas.reportes_ciudadanos;
+    const nombreTabla = "reportes_ciudadanos";
+    const estiloColor = cfg.color;
+    const limite = 1000;
+    let offset = 0;
+
+    function pedirFragmento() {
+        fetch(`${SUPABASE_URL}${nombreTabla}?select=*&limit=${limite}&offset=${offset}`, {
+            headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+        })
+        .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+        .then(data => {
+            if (!Array.isArray(data) || data.length === 0) return;
+            const features = data.map(item => {
+                if (!item.geom) return null;
+                return { type: "Feature", geometry: item.geom, properties: { ...item, geom: null } };
+            }).filter(f => f !== null);
+            if (features.length === 0) return;
+
+            const geojson = { type: "FeatureCollection", features };
+            const campos = popupFields[nombreTabla] || [];
+
+            L.geoJSON(geojson, {
+                pointToLayer: (f, latlng) => L.circleMarker(latlng, {
+                    radius: 7, fillColor: estiloColor, color: "#ffffff", weight: 2, fillOpacity: 0.8
+                }),
+                onEachFeature: (f, layer) => {
+                    let filas = "";
+                    campos.forEach(c => {
+                        const v = f.properties[c];
+                        if (v !== null && v !== undefined && v !== "") {
+                            filas += `<tr><td>${camposLegibles[c] || c}</td><td>${v}</td></tr>`;
+                        }
+                    });
+                    if (!filas) filas = '<tr><td style="text-align:center;padding:12px;color:#94a3b8">Sin datos</td></tr>';
+                    layer.bindPopup(`<div><div class="popup-header">${cfg.label}</div><table>${filas}</table></div>`);
+                }
+            }).addTo(grupo);
+
+            if (data.length === limite) { offset += limite; pedirFragmento(); }
+        })
+        .catch(err => console.error(`Error recargando reportes:`, err));
+    }
+    pedirFragmento();
+}
+
+function abrirPanelReporte() {
+    document.getElementById('report-panel').classList.remove('panel-hidden');
+}
+
+function cerrarPanelReporte() {
+    document.getElementById('report-panel').classList.add('panel-hidden');
+    if (reportMarker) {
+        map.removeLayer(reportMarker);
+        reportMarker = null;
+    }
+    document.getElementById('latitud').value = '';
+    document.getElementById('longitud').value = '';
+    document.getElementById('btn-enviar').disabled = true;
+}
+
+function colocarMarcadorReporte(lat, lng) {
+    const icon = L.divIcon({ className: 'leaflet-report-marker', iconSize: [16, 16] });
+    if (reportMarker) map.removeLayer(reportMarker);
+    reportMarker = L.marker([lat, lng], { icon, draggable: true }).addTo(map);
+    document.getElementById('latitud').value = lat.toFixed(6);
+    document.getElementById('longitud').value = lng.toFixed(6);
+    document.getElementById('btn-enviar').disabled = false;
+    reportMarker.on('dragend', function() {
+        const p = reportMarker.getLatLng();
+        document.getElementById('latitud').value = p.lat.toFixed(6);
+        document.getElementById('longitud').value = p.lng.toFixed(6);
+    });
+}
+
+function resetForm() {
+    document.getElementById('tipo').value = '';
+    document.getElementById('comentario').value = '';
+    document.getElementById('latitud').value = '';
+    document.getElementById('longitud').value = '';
+    document.getElementById('btn-enviar').disabled = true;
+    document.getElementById('btn-enviar').textContent = 'Enviar reporte';
+    document.getElementById('btn-enviar').disabled = false;
+    if (reportMarker) { map.removeLayer(reportMarker); reportMarker = null; }
+    document.querySelector('.panel-body').style.display = 'block';
+    document.getElementById('panel-success').classList.remove('show');
+}
+
+document.getElementById('btn-reportar').addEventListener('click', abrirPanelReporte);
+document.getElementById('btn-cerrar-panel').addEventListener('click', cerrarPanelReporte);
+
+map.on('click', function(e) {
+    if (!document.getElementById('report-panel').classList.contains('panel-hidden')) {
+        colocarMarcadorReporte(e.latlng.lat, e.latlng.lng);
+    }
+});
+
+document.getElementById('btn-enviar').addEventListener('click', async function() {
+    const tipo = document.getElementById('tipo').value;
+    const comentario = document.getElementById('comentario').value.trim();
+    const lat = parseFloat(document.getElementById('latitud').value);
+    const lng = parseFloat(document.getElementById('longitud').value);
+
+    if (!tipo) { alert('Selecciona un tipo de problema.'); return; }
+    if (isNaN(lat) || isNaN(lng)) { alert('Haz clic en el mapa para marcar la ubicacion.'); return; }
+
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+
+    try {
+        const res = await fetch(`${SUPABASE_URL}reportes_ciudadanos`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
+            },
+            body: JSON.stringify({
+                tipo_problema: tipo,
+                comentario: comentario || null,
+                latitud: lat,
+                longitud: lng
+            })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        document.querySelector('.panel-body').style.display = 'none';
+        document.getElementById('panel-success').classList.add('show');
+        recargarReportes();
+    } catch (err) {
+        alert('Error al enviar el reporte. Intenta de nuevo.');
+        console.error(err);
+        btn.disabled = false;
+        btn.textContent = 'Enviar reporte';
+    }
+});
