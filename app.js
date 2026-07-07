@@ -137,10 +137,16 @@ function finalizarCarga(features, grupoCapa, nombreTabla, estiloColor) {
 
             if (!filas) filas = '<tr><td style="text-align:center;padding:12px;color:#94a3b8">Sin datos disponibles</td></tr>';
 
+            let extra = "";
+            if (nombreTabla === "reportes_ciudadanos" && feature.properties.id) {
+                extra = buildStatusSelector(feature.properties.id, feature.properties.estado);
+            }
+
             layer.bindPopup(`
                 <div>
                     <div class="popup-header">${label}</div>
                     <table>${filas}</table>
+                    ${extra}
                 </div>
             `);
         }
@@ -174,6 +180,20 @@ function finalizarCarga(features, grupoCapa, nombreTabla, estiloColor) {
         const bounds = L.featureGroup(capaGeoJSONs).getBounds();
         if (bounds.isValid()) map.fitBounds(bounds, { padding: [30, 30] });
     }
+}
+
+function buildStatusSelector(id, estadoActual) {
+    const estados = [
+        { valor: "pendiente", label: "Pendiente", color: "#f59e0b" },
+        { valor: "en_proceso", label: "En Proceso", color: "#3b82f6" },
+        { valor: "resuelto", label: "Resuelto", color: "#10b981" }
+    ];
+    let btns = "";
+    estados.forEach(e => {
+        const activo = e.valor === estadoActual ? "leyenda-estado-btn activo" : "leyenda-estado-btn";
+        btns += `<button class="${activo}" data-id="${id}" data-estado="${e.valor}" style="background:${e.color}">${e.label}</button>`;
+    });
+    return `<div class="leyenda-estado"><div class="leyenda-estado-titulo">Estado:</div><div class="leyenda-estado-grupo">${btns}</div></div>`;
 }
 
 function ocultarLoading() {
@@ -260,7 +280,11 @@ function recargarReportes() {
                         }
                     });
                     if (!filas) filas = '<tr><td style="text-align:center;padding:12px;color:#94a3b8">Sin datos</td></tr>';
-                    layer.bindPopup(`<div><div class="popup-header">${cfg.label}</div><table>${filas}</table></div>`);
+                    let extra = "";
+                    if (f.properties.id) {
+                        extra = buildStatusSelector(f.properties.id, f.properties.estado);
+                    }
+                    layer.bindPopup(`<div><div class="popup-header">${cfg.label}</div><table>${filas}</table>${extra}</div>`);
                 }
             }).addTo(grupo);
 
@@ -376,6 +400,35 @@ function generarPDF() {
         btn.disabled = false;
     });
 }
+
+async function actualizarEstadoReporte(id, nuevoEstado) {
+    try {
+        const res = await fetch(`${SUPABASE_URL}reportes_ciudadanos?id=eq.${id}`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': SUPABASE_KEY,
+                'Authorization': `Bearer ${SUPABASE_KEY}`
+            },
+            body: JSON.stringify({ estado: nuevoEstado })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        recargarReportes();
+        return true;
+    } catch (err) {
+        console.error('Error actualizando estado:', err);
+        alert('Error al actualizar el estado');
+        return false;
+    }
+}
+
+document.getElementById('map').addEventListener('click', function(e) {
+    const btn = e.target.closest('.leyenda-estado-btn');
+    if (!btn) return;
+    const id = btn.dataset.id;
+    const estado = btn.dataset.estado;
+    if (id && estado) actualizarEstadoReporte(id, estado);
+});
 
 document.getElementById('btn-pdf').addEventListener('click', generarPDF);
 document.getElementById('btn-reportar').addEventListener('click', abrirPanelReporte);
