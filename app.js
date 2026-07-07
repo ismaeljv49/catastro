@@ -47,6 +47,7 @@ const map = L.map('map', {
 }).setView([-4.066, -78.966], 14);
 
 L.control.zoom({ position: 'bottomright' }).addTo(map);
+L.control.scale({ position: 'bottomleft', metric: true, imperial: false, maxWidth: 200 }).addTo(map);
 
 const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19
