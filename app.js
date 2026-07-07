@@ -313,6 +313,71 @@ function resetForm() {
     document.getElementById('panel-success').classList.remove('show');
 }
 
+// ---- Generar PDF ----
+
+function generarPDF() {
+    const btn = document.getElementById('btn-pdf');
+    btn.textContent = 'Generando...';
+    btn.disabled = true;
+
+    fetch(`${SUPABASE_URL}reportes_ciudadanos?select=*&order=created_at.desc`, {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    })
+    .then(res => { if (!res.ok) throw new Error(`HTTP ${res.status}`); return res.json(); })
+    .then(data => {
+        const { jsPDF } = window.jspdf;
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+
+        const etiquetaProblema = { bache: 'Bache', alumbrado: 'Alumbrado', basura: 'Basura', alcantarillado: 'Alcantarillado', vereda: 'Vereda', senaletica: 'Señaletica', arbol: 'Arbol', inundacion: 'Inundacion', vandalismo: 'Vandalismo', otro: 'Otro' };
+        const etiquetaEstado = { pendiente: 'Pendiente', en_proceso: 'En proceso', resuelto: 'Resuelto' };
+
+        const filas = (data || []).map(r => [
+            r.id,
+            etiquetaProblema[r.tipo_problema] || r.tipo_problema,
+            r.comentario || '-',
+            etiquetaEstado[r.estado] || r.estado,
+            r.latitud ? r.latitud.toFixed(5) : '-',
+            r.longitud ? r.longitud.toFixed(5) : '-',
+            r.created_at ? new Date(r.created_at).toLocaleDateString('es-EC') : '-'
+        ]);
+
+        doc.setFontSize(16);
+        doc.text('Reportes Ciudadanos - Zamora', 14, 18);
+        doc.setFontSize(10);
+        doc.text(`Generado: ${new Date().toLocaleString('es-EC')}`, 14, 25);
+        doc.text(`Total de reportes: ${filas.length}`, 14, 31);
+
+        doc.autoTable({
+            startY: 37,
+            head: [['#', 'Problema', 'Comentario', 'Estado', 'Latitud', 'Longitud', 'Fecha']],
+            body: filas,
+            styles: { fontSize: 8, cellPadding: 2 },
+            headStyles: { fillColor: [59, 130, 246], fontSize: 8, halign: 'center' },
+            columnStyles: {
+                0: { cellWidth: 8, halign: 'center' },
+                1: { cellWidth: 28 },
+                2: { cellWidth: 70 },
+                3: { cellWidth: 20, halign: 'center' },
+                4: { cellWidth: 28, halign: 'center' },
+                5: { cellWidth: 28, halign: 'center' },
+                6: { cellWidth: 22, halign: 'center' }
+            },
+            alternateRowStyles: { fillColor: [248, 250, 252] }
+        });
+
+        doc.save(`reportes_ciudadanos_${new Date().toISOString().slice(0, 10)}.pdf`);
+    })
+    .catch(err => {
+        alert('Error al generar PDF');
+        console.error(err);
+    })
+    .finally(() => {
+        btn.textContent = 'PDF';
+        btn.disabled = false;
+    });
+}
+
+document.getElementById('btn-pdf').addEventListener('click', generarPDF);
 document.getElementById('btn-reportar').addEventListener('click', abrirPanelReporte);
 document.getElementById('btn-cerrar-panel').addEventListener('click', cerrarPanelReporte);
 

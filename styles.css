@@ -60,6 +60,16 @@ body {
     background: #2563eb;
 }
 
+.title-btn-secondary {
+    background: transparent;
+    border: 1.5px solid rgba(255, 255, 255, 0.2);
+}
+
+.title-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
 #loading {
     position: fixed;
     inset: 0;
