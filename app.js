@@ -178,6 +178,27 @@ function finalizarCarga(features, grupoCapa, nombreTabla, estiloColor) {
 function ocultarLoading() {
     const el = document.getElementById('loading');
     if (el) el.classList.add('hidden');
+    crearLeyenda();
+}
+
+function crearLeyenda() {
+    const leyenda = L.control({ position: 'bottomright' });
+
+    leyenda.onAdd = function() {
+        const div = L.DomUtil.create('div', 'leyenda');
+        let html = '<div class="leyenda-title">Leyenda</div>';
+        Object.keys(configCapas).forEach(nombre => {
+            const cfg = configCapas[nombre];
+            const icono = cfg.puntos
+                ? `<span class="leyenda-circulo" style="background:${cfg.color}"></span>`
+                : `<span class="leyenda-cuadrado" style="background:${cfg.color}"></span>`;
+            html += `<div class="leyenda-item">${icono}<span>${cfg.label}</span></div>`;
+        });
+        div.innerHTML = html;
+        return div;
+    };
+
+    leyenda.addTo(map);
 }
 
 const capaGeoJSONs = [];
